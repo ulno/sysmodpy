@@ -37,7 +37,7 @@ class Test(TestCase):
         decorate(University, Student, Room)
         sru = University().with_name("Study Right University")
         karli = Student().with_name("Karli")
-        alice = Student().with_name("Karli")
+        alice = Student().with_name("Alice")
         print(sru.get_name())
         sru.add_students(karli, alice)
         audimax = Room().with_name("Audimax")
