@@ -8,25 +8,24 @@ from sysmodpy import decorate
 class University:
     name: str
     # associations
-    student: Student = None
-    # students: Set[Student]
-    rooms: Set[University]
+    students: Set[Student]
+    rooms: Set[Room]
 
 
 class Student:
     name: str
     student_id: str
-    credits: int
-    motivation: int
+    credits: int = 0
+    motivation: int = 0
     # associations
-    university: University = None
+    university: University
     room: Room
 
 class Room:
     name: str
     room_number: str
-    topic: str
-    credits: int
+    topic: str = "N/A"
+    credits: int = 0
     # associations
     university: University
     students: Set[Student]
@@ -38,12 +37,14 @@ class Test(TestCase):
         decorate(University, Student, Room)
         sru = University().with_name("Study Right University")
         karli = Student().with_name("Karli")
+        alice = Student().with_name("Karli")
         print(sru.get_name())
-        sru.set_student(karli)
+        sru.add_students(karli, alice)
         audimax = Room().with_name("Audimax")
         sru.add_rooms(audimax)
-        print("get_student1:", sru.get_student())
-        sru.remove_student(karli)
-        print("get_student2:", sru.get_student())
+        karli.set_room(audimax)
+        print("get_student1:", sru.get_students())
+        sru.remove_students(karli)
+        print("get_student2:", sru.get_students())
         print("get_room_from_sru:", sru.get_rooms())
         #self.fail()

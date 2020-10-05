@@ -15,28 +15,33 @@ from __future__ import annotations
 from typing import List, Set
 import re
 
-def _set(self, attrib : str, val, ext=None):
+
+def _set(self, attrib : str, val, ext=None, ext_name:str = None):
     """
     Generic set function for one side of class associations.
     :param self: the local object instance
     :param attrib: a string with the name of the local attribute that is changed
     :param val: the new value
     :param ext: potential external object of associated class that is affected
+    :param ext_name: name of the attribute in external associated class that stores this association
     :return: returns the given object to allow constructing fluent style
     """
     # TODO: consider adding property change listener support
     old_value = getattr(self, attrib, None)
-    if old_value == val: # check if update
-        return self # if not, just return
-    if ext: # bidirectional
-        exec(f"ext.remove_{attrib}({old_value})")
+    if old_value == val:  # check if update
+        return self  # if not, just return
+    if ext_name:  # bidirectional
+        if old_value is not None:
+            exec(f"old_value.remove_{ext_name}(old_value)")
         setattr(self, attrib, val)
-        exec(f"ext.add_{attrib}({self})")
-    else: # unidirectional
-        setattr(self, attrib, val); # TODO: check if there is a better way than using a string as attribute here (also for all functions below)
+        if val is not None:
+            exec(f"val.add_{ext_name}(self)")
+    else:  # unidirectional
+        setattr(self, attrib, val) # TODO: check if there is a better way than using a string as attribute here (also for all functions below)
     return self
 
-def _remove_single(self, attrib : str, val, ext=None, ext_name=None):
+
+def _remove_single(self, attrib : str, ext=None, ext_name:str=None):
     """
     Generic remove function for one side of class associations in a local to-1 association
     :param self: the local object instance
@@ -48,16 +53,17 @@ def _remove_single(self, attrib : str, val, ext=None, ext_name=None):
     """
     # TODO: consider adding property change listener support
     old_value = getattr(self, attrib, None)
-    if old_value == None: # already removed
-        return self # if not, just return
-    if ext: # bidirectional
+    if old_value == None:  # already removed
+        return self  # if not, just return
+    if ext:  # bidirectional
         setattr(self, attrib, None)
         exec(f"ext.remove_{ext_name}(self)")
-    else: # unidirectional
+    else:  # unidirectional
         setattr(self, attrib, None);
     return self
 
-def _remove_from_container(self, attrib : str, val, ext=None, ext_name=None):
+
+def _remove_from_container(self, attrib : str, val_set, ext=None, ext_name:str=None):
     """
     Generic remove function for one side of class associations in a local to-n association
     :param self: the local object instance
@@ -70,16 +76,18 @@ def _remove_from_container(self, attrib : str, val, ext=None, ext_name=None):
     # TODO: consider adding property change listener support
     container = getattr(self, attrib, None)
     if container is None:
-        container = set() # TODO: look at annotations if we should create a set or a list here
-        setattr(self, attrib, container) # make sure, there is a container
-    if not val in container: # check if update necessary (already removed?)
-        return self # if not, just return
-    container.remove(val)
-    if ext: # bidirectional
-        exec(f"ext.remove_{ext_name}(self)")
+        container = set()  # TODO: look at annotations if we should create a set or a list here
+        setattr(self, attrib, container)  # make sure, there is a container
+    for val in val_set:
+        if not val in container:  # check if update necessary (already removed?)
+            continue  # if not, just continue
+        container.remove(val)
+        if ext:  # bidirectional
+            exec(f"val.remove_{ext_name}(self)")
     return self
 
-def _add(self, attrib : str, val, ext=None, ext_name=None):
+
+def _add(self, attrib : str, val_set, ext=None, ext_name:str=None):
     """
     Generic add function for one side of class associations in a to-many association
     :param self: the local object instance
@@ -92,16 +100,19 @@ def _add(self, attrib : str, val, ext=None, ext_name=None):
     # TODO: consider adding property change listener support
     container = getattr(self, attrib, None)
     if container is None:
-        container = set() # TODO: look at annotations if we should create a set or a list here
-        setattr(self, attrib, container) # make sure, there is a container
-    if val in container: # check if update necessary
-        return self # if not, just return
-    container.add(val)
-    if ext: # bidirectional
-        exec(f"ext.add_{ext_name}({self})") # TODO: n:n - so far only n:1?
+        container = set()  # TODO: look at annotations if we should create a set or a list here
+        setattr(self, attrib, container)  # make sure, there is a container
+    for val in val_set:
+        if val in container:  # check if update necessary
+            continue  # if not, just proceed
+        container.add(val)
+        if ext_name:  # bidirectional
+            exec(f"val.add_{ext_name}(self)")  # TODO: check n:n - so far only n:1?
     return self
 
+
 def _container_check(elem: str) -> (str, str):
+    # parse an annotation type and extract List or Set (and the type)
     container = None
     m = re.match("(Set|List)\[(\w+)\]", elem)
     if m:  # pay attention to Set and List - this is a to-many end of an association
@@ -137,32 +148,33 @@ def decorate(*class_or_classes) -> None:
             print(f"{annotation} - {elem}")
             elem_type_str, container = _container_check(elem)
 
-            exec(f"c.get_{annotation} = lambda self: self.{annotation}") # always generate getter
+            if getattr(c, annotation, None) is None:
+                setattr(c, annotation, None)  # make sure there is a default attribute
 
-            if elem_type_str in classes_dict: # seems to be an association between two classes that we want to decorate
+            exec(f"c.get_{annotation} = lambda self: self.{annotation}")  # always generate getter TODO: return copy of container if to-many
+
+            if elem_type_str in classes_dict:  # seems to be an association between two classes that we want to decorate
                 # check if there is association in referenced class
                 bidirectional = False
                 ext_elem = None
                 for ext_annotation in classes_dict[elem_type_str].__annotations__:
                     ext_elem = classes_dict[elem_type_str].__annotations__[ext_annotation]
                     ext_type_str, ext_container = _container_check(ext_elem)
-                    if ext_type_str == c.__name__: # that's a match # TODO: add logic to distinguish different associations between same classes
+                    if ext_type_str == c.__name__:  # that's a match # TODO: add logic to distinguish different associations between same classes
                         bidirectional = True
-                        break # TODO: support multiple different associations between same classes
+                        break  # TODO: support multiple different associations between same classes
                 if bidirectional:
-                    if container: # local to-many end
-                        if getattr(c, annotation, None) is None:
-                            setattr(c, annotation, None) # make sure there is a default attribute
-                        exec(f"c.add_{annotation} = lambda self, value: _add(self,\"{annotation}\",value,self.{annotation},\"{ext_annotation}\")")
+                    if container:  # local to-many end
+                        exec(f"c.add_{annotation} = lambda self, *value: _add(self,\"{annotation}\",set(value),self.{annotation},\"{ext_annotation}\")")
                         exec(f"c.with_{annotation} = c.add_{annotation}")
-                        exec(f"c.remove_{annotation} = lambda self, value: _remove_from_container(self,\"{annotation}\",value,self.{annotation},\"{ext_annotation}\")")
-                    else: # local to-one end
-                        exec(f"c.set_{annotation} = lambda self, value: _set(self,\"{annotation}\",value,self.{annotation})")
+                        exec(f"c.remove_{annotation} = lambda self, *value: _remove_from_container(self,\"{annotation}\",set(value),self.{annotation},\"{ext_annotation}\")")
+                    else:  # local to-one end
+                        exec(f"c.set_{annotation} = lambda self, value: _set(self,\"{annotation}\",value,self.{annotation},\"{ext_annotation}\")")
                         exec(f"c.add_{annotation} = c.set_{annotation}")
                         exec(f"c.with_{annotation} = c.set_{annotation}")
-                        exec(f"c.remove_{annotation} = lambda self, value: _remove_single(self,\"{annotation}\",value,self.{annotation},\"{ext_annotation}\")")
+                        exec(f"c.remove_{annotation} = lambda self, value: _remove_single(self,\"{annotation}\",self.{annotation},\"{ext_annotation}\")")
                         # TODO: more association logic
-            else: # "just" an attribute or external class
+            else:  # "just" an attribute or external class
                 # generate attribute functions - "normal" getters and setters
                 exec(f"c.set_{annotation} = lambda self, value: _set(self,\"{annotation}\",value)")
                 exec(f"c.with_{annotation} = c.set_{annotation}")
